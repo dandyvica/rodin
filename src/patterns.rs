@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use hex_literal::hex;
@@ -20,11 +23,12 @@ pub fn patterns() -> AhoCorasick {
     ac
 }
 
-pub fn filetype_index() -> HashMap<String, u32> {
+pub type FileTypeCounter = Arc<Mutex<HashMap<String, u32>>>;
+pub fn filetype_counter() -> Arc<Mutex<HashMap<String, u32>>> {
     let mut h = HashMap::<String, u32>::new();
 
     h.insert(String::from("bmp"), 0);
     h.insert(String::from("wav"), 0);
 
-    h
+    Arc::new(Mutex::new(h))
 }

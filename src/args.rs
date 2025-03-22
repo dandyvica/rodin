@@ -18,6 +18,9 @@ pub struct CliOptions {
     // minimum file size to consider
     pub min_size: usize,
 
+    // number of threads to use
+    pub nb_threads: usize,
+
     // display progress bar
     pub progress_bar: bool,
 }
@@ -71,6 +74,15 @@ impl CliOptions {
                     .required(false),
             )
             .arg(
+                Arg::new("nbthreads")
+                    .short('n')
+                    .long("nbthreads")
+                    .long_help("Number of threads to use to split the carving")
+                    .value_name("THREADS")
+                    .value_parser(clap::value_parser!(usize))
+                    .required(false),
+            )
+            .arg(
                 Arg::new("log")
                     .long("log")
                     .long_help("Save debugging info into the file LOG.")
@@ -101,6 +113,7 @@ impl CliOptions {
         options.input_file = matches.get_one::<PathBuf>("input").unwrap().clone();
         options.buffer_size = *matches.get_one::<usize>("buffer").unwrap_or_else(|| &4096);
         options.min_size = *matches.get_one::<usize>("minsize").unwrap_or_else(|| &0);
+        options.nb_threads = *matches.get_one::<usize>("nbthreads").unwrap_or_else(|| &1);
 
         // manage debugging
         if matches.contains_id("verbose") {

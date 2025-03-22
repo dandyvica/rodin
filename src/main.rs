@@ -1,17 +1,22 @@
-use std::fs::{self, File};
+use std::{
+    collections::HashMap, fs::{self, File}, ops::Mul, sync::{Arc, Mutex}, thread
+};
 
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::debug;
 use memmap2::MmapOptions;
 
 mod patterns;
-use patterns::{filetype_index, patterns};
+use patterns::{filetype_counter, patterns};
 
 mod args;
 use args::CliOptions;
 
 mod carver;
 use carver::carve_using_size;
+
+mod search;
+use search::{Context, search};
 
 mod filetypes;
 use filetypes::bmp::BMP;
@@ -22,102 +27,97 @@ fn main() -> anyhow::Result<()> {
 
     // open image and build mmap
     let file = File::open(&opts.input_file)?;
-    let metadata = file.metadata()?;
     let mmap = unsafe { MmapOptions::new().map(&file)? };
+    let mmap = Arc::new(mmap);
 
-    let size = metadata.len();
-    let mut offset = 0u64;
-
-    let mut ft = filetype_index();
+    let ftype_counter = filetype_counter();
 
     // build aho-corasick engine
-    let ac = patterns();
+    // let ac = patterns();
 
-    // buld the progress bar
-    let pb = ProgressBar::new(size);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({eta})")
-            .unwrap(),
-    );
+    // create a MultiProgress object to manage multiple progress bars
+    let multi_progress = Arc::new(MultiProgress::new());
 
-    let buffer_size = opts.buffer_size;
+    // compute the different segments according to the number of threads
+    let mut handles = vec![];
+    let chunk_size = mmap.len() / opts.nb_threads;
 
-    // loop through bytes trying to discover some patterns
-    while offset < size {
-        let buf = window(&mmap, size, offset, buffer_size);
-        let mut hop = buf.len() as u64;
+    for i in 0..opts.nb_threads {
+        let mmap_clone = Arc::clone(&mmap); // Clone Arc for each thread
+        let multi_progress_clone = Arc::clone(&multi_progress);
+        let mut ftype_counter_clone = Arc::clone(&ftype_counter);
 
-        for mat in ac.find_iter(&buf) {
-            debug!(
-                "Found pattern {:?} at offset 0x{:X?}",
-                mat.pattern().as_u64(),
-                offset + mat.start() as u64
-            );
+        // let mut map = ftype_counter_clone.lock().unwrap();
+        // map.insert(String::from("key"), 42);
 
-            let found_offset = offset + mat.start() as u64;
+        // spawn thread
+        let handle = thread::spawn(move || {
 
-            let x =
-                carve_using_size::<BMP>(&mmap[found_offset as usize..], &mut ft, opts.min_size)?;
+            println!("================== starting thread {}",  i);
 
-            if x == 0 {
-                continue;
-            }
+            // calculate the buffer offsets
+            let start = i * chunk_size;
+            let end = if i == opts.nb_threads - 1 {
+                mmap_clone.len()
+            } else {
+                start + chunk_size
+            };
 
-            hop = x;
-            break;
+            // define a progress bar
+            let pb = multi_pbar(&multi_progress_clone, end, i);
 
-            // fs::write("output.bin", &buf)?; // Saves buffer to file
-            // std::process::exit(1);
+            // define an ew Aho-Corasick engine
+            let ac = patterns();
+
+            // each thread processes its assigned chunk
+            let chunk = &mmap_clone[start..end];
+
+            // now search within each chunk
+            let mut ctx = Context {
+                chunk: chunk,
+                buffer_size: opts.buffer_size,
+                min_size: opts.min_size,
+                pb: &pb,
+                ac: &ac,
+                ft: &mut ftype_counter_clone,
+            };
+
+            search(&mut ctx);
+
+            println!("????????? {}", i);
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all threads to complete
+    let mut i = 0;
+    for handle in handles {
+        match handle.join() {
+            Ok(_) => println!("Thread {} finished successfully!", i),
+            Err(_) => println!("Thread {} panicked!", i),
         }
-
-        // move forward
-        offset += hop;
-
-        // update bar
-        pb.set_position(offset);
+        i += 1;
     }
 
     Ok(())
 }
 
-fn window(mmap: &[u8], size: u64, offset: u64, buffer_size: usize) -> &[u8] {
-    let lower = offset as usize;
-    let upper = if lower + buffer_size < (size as usize) {
-        lower + buffer_size
-    } else {
-        size as usize
-    };
+// define mutli-progress bars, one for each thread
+fn multi_pbar(mp: &Arc<MultiProgress>, length: usize, thread_number: usize) -> ProgressBar {
+    let pb = mp.add(ProgressBar::new(length as u64));
 
-    &mmap[lower..upper]
-}
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{msg}] {bar:40.cyan/blue} {pos}/{len}")
+            .unwrap(),
+    );
+    // pb.set_style(
+    //     ProgressStyle::default_bar()
+    //         .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({eta})")
+    //         .unwrap(),
+    // );
+    // pb.set_message(format!("Thread {}", thread_number + 1));
 
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    fn window_() {
-        let buf = b"AAAAAAAAAABBBBBBBBBB";
-
-        let w = window(&buf.as_slice(), buf.len() as u64, 0, 5);
-        assert_eq!(w.len(), 5);
-        assert_eq!(w, b"AAAAA");
-
-        let w = window(&buf.as_slice(), buf.len() as u64, 5, 10);
-        assert_eq!(w.len(), 10);
-        assert_eq!(w, b"AAAAABBBBB");
-
-        let w = window(&buf.as_slice(), buf.len() as u64, 10, 10);
-        assert_eq!(w.len(), 10);
-        assert_eq!(w, b"BBBBBBBBBB");
-
-        let w = window(&buf.as_slice(), buf.len() as u64, 15, 10);
-        assert_eq!(w.len(), 5);
-        assert_eq!(w, b"BBBBB");
-
-        let w = window(&buf.as_slice(), buf.len() as u64, 19, 10);
-        assert_eq!(w.len(), 5);
-        assert_eq!(w, b"BB");
-    }
+    pb
 }

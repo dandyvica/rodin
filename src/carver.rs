@@ -4,7 +4,10 @@ use std::{
     io::{BufWriter, Cursor, Write},
 };
 
+use indicatif::ProgressBar;
 use log::debug;
+
+use crate::patterns::FileTypeCounter;
 
 pub trait Carver {
     fn size(&self) -> usize; // size of the file we're trying to carve
@@ -15,8 +18,9 @@ pub trait Carver {
 
 pub fn carve_using_size<T>(
     buffer: &[u8],
-    index: &mut HashMap<String, u32>,
+    ft_counter: &mut FileTypeCounter,
     min_size: usize,
+    pb: &ProgressBar
 ) -> anyhow::Result<u64>
 where
     T: Carver + Default + std::fmt::Debug,
@@ -39,17 +43,23 @@ where
 
         // save bitmap
         let ext = header.ext();
-        let filename = format!("{}_{:08}.{}", ext, index[&ext], ext);
+        let filename = {
+            let map = ft_counter.lock().unwrap();
+            format!("{}_{:08}.{}", ext, map[&ext], ext)
+        };
         let file = File::create(&filename)?;
         let mut writer = BufWriter::new(file);
+
+        pb.set_message(filename);
 
         writer.write_all(&payload)?;
         writer.flush()?; // Ensure everything is written        
 
-        // add 1 to our per extension index
-        index.entry(ext).and_modify(|count| *count += 1);
+        // add 1 to our per extension counter
+        let mut map = ft_counter.lock().unwrap();
+        map.entry(ext).and_modify(|count| *count += 1);
 
-        // move offset
+        // move offset, lock will be automatically released
         return Ok(header.size() as u64);
     } else {
         return Ok(0);
