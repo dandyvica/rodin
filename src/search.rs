@@ -1,85 +1,83 @@
 // main ffunction for searching patterns in a segment
 // a segment is made of a starting and ending offset
 
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range, sync::Arc};
 
-use crate::{carver::carve_using_size, filetypes::bmp::BMP, patterns::FileTypeCounter};
+use crate::{
+    carvers::size_carver::carve_using_size,
+    filetypes::{Corpus, FileTypeCounter, bmp::BMP},
+};
 
 use aho_corasick::AhoCorasick;
 use indicatif::ProgressBar;
 use log::debug;
+use memmap2::Mmap;
 
 #[derive(Debug)]
 pub struct Context<'a> {
-    pub chunk: &'a [u8],                  // the bytes buffer to search
-    pub buffer_size: usize,               // size of the window to search
-    pub min_size: usize,                  // minium size of a file to be carved
-    pub pb: &'a ProgressBar,              // ref on progress bar
-    pub ac: &'a AhoCorasick,              // ref on Aho-Corasick engine
+    pub mmap: &'a [u8],              // the mmap to search
+    pub bounds: Range<usize>,        // contains the bounds of the chunk to search
+    pub buffer_size: usize,          // size of the window to search
+    pub min_size: usize,             // minium size of a file to be carved
+    pub pb: &'a ProgressBar,         // ref on progress bar
+    pub ac: &'a AhoCorasick,         // ref on Aho-Corasick engine
     pub ft: &'a mut FileTypeCounter, // ref on the file types counter
+    pub corpus: &'a Corpus,          // ref on global corpus
 }
-// #[derive(Debug)]
-// pub struct Context<'a> {
-//     pub mmap: &'a [u8],               // the bytes buffer to search
-//     pub starting_offset: u64,         // the offset from which to search
-//     pub ending_offset: u64,           // the offset up to which to search
-//     pub buffer_size: usize,           // size of the window to search
-//     pub min_size: usize,              // minium size of a file to be carved
-//     pub pb: &'a ProgressBar,          // ref on progress bar
-//     pub ac: &'a AhoCorasick,          // ref on Aho-Corasick engine
-//     pub ft: &'a mut HashMap<String, u32>, // ref on the file types counter
-// }
 
-pub fn search(ctx: &mut Context) -> anyhow::Result<()> {
+pub fn search(ctx: &mut Context) -> anyhow::Result<usize> {
     // loop through bytes trying to discover some patterns
     let mut offset = 0u64;
+    let absolute_offset = ctx.bounds.start;
 
-    // while offset < ctx.chunk.len() as u64 {
-    //     let buf = window(
-    //         &ctx.mmap,
-    //         ctx.ending_offset,
-    //         ctx.starting_offset,
-    //         ctx.buffer_size,
-    //     );
-    //     let mut hop = buf.len() as u64;
+    // we count the number of files found for each thread
+    let mut files_found = 0usize;
 
-        for mat in ctx.ac.find_iter(&ctx.chunk) {
-            debug!(
-                "Found pattern {:?} at offset 0x{:X?}",
-                mat.pattern().as_u64(),
-                offset + mat.start() as u64
-            );
+    // we're searching to this chunk
+    let chunk = &ctx.mmap[ctx.bounds.clone()];
 
-            let found_offset = offset + mat.start() as u64;
+    // loop through what we found
+    for mat in ctx.ac.find_iter(&chunk) {
+        debug!(
+            "Found pattern {:?} at offset 0x{:X?}",
+            mat.pattern().as_u64(),
+            mat.start() as u64
+        );
 
-            let x = carve_using_size::<BMP>(
-                &ctx.chunk[found_offset as usize..],
-                &mut ctx.ft,
-                ctx.min_size,
-                ctx.pb
-            )?;
+        // pattern returned contains the index of the pattern
+        let ft = ctx
+            .corpus
+            .get(mat.pattern().as_usize())
+            .expect("error getting magic");
+        let carving_func = ft.carving_func;
 
-            if x == 0 {
-                continue;
-            }
+        let absolute_found_offset = absolute_offset + mat.start();
+        ctx.pb.set_position(mat.start() as u64);
 
-            ctx.pb.set_position(x);
+        let res = carving_func(
+            &ctx.mmap[absolute_found_offset..],
+            &mut ctx.ft,
+            &ft.category,
+            ctx.min_size,
+        )?;
 
-            // hop = x;
-            // break;
-
-            // // fs::write("output.bin", &buf)?; // Saves buffer to file
-            // // std::process::exit(1);
+        // offset returned is 0, the so called file is not carved
+        if res.offset == 0 {
+            continue;
         }
 
-        // // move forward
-        // offset += hop;
+        // update progress bar with file name being carved
+        let file_name = res.file_name.unwrap();
+        debug!(
+            "found image {} at offset {}",
+            file_name, absolute_found_offset
+        );
+        ctx.pb.set_message(file_name);
 
-        // // update bar
-        // ctx.pb.set_position(offset);
-    // }
+        files_found += 1;
+    }
 
-    Ok(())
+    Ok(files_found)
 }
 // pub fn search(ctx: &mut Context) -> anyhow::Result<()> {
 //     // loop through bytes trying to discover some patterns

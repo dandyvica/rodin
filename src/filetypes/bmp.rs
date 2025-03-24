@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::carver::Carver;
+use crate::carvers::size_carver::SizeCarver;
 
 // see: https://www.ece.ualberta.ca/~elliott/ee552/studentAppNotes/2003_w/misc/bmp_file_format/bmp_file_format.htm
 #[derive(Debug, Default)]
@@ -24,7 +24,7 @@ pub struct BMP {
     bi_clr_important: u32, // the number of important colors used, or 0 when every color is important; generally ignored
 }
 
-impl Carver for BMP {
+impl SizeCarver for BMP {
     fn size(&self) -> usize {
         return self.size as usize;
     }
