@@ -5,10 +5,11 @@ use std::{
 };
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
+use hex_literal::hex;
 use wav::WAV;
 
 use crate::{
-    carvers::{CarvingResult, size_carver::carve_using_size},
+    carvers::{CarvingResult, fourcc_carver::fourcc_carver, size_carver::carve_using_size},
     filetypes::bmp::BMP,
 };
 
@@ -61,6 +62,15 @@ impl Corpus {
             ext: String::from("wav"),
             carving_func: carve_using_size::<WAV>,
             category: String::from("audio/wav"),
+            min_size: 10000,
+        });
+
+        // PNG
+        vec.push(FileType {
+            magic: hex!("89 50 4E 47 0D 0A 1A 0A").to_vec(),
+            ext: String::from("png"),
+            carving_func: fourcc_carver,
+            category: String::from("images/png"),
             min_size: 10000,
         });
 
