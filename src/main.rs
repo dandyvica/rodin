@@ -1,10 +1,4 @@
-use std::{
-    collections::HashMap,
-    fs::{self, File},
-    ops::{Mul, Range},
-    sync::{Arc, Mutex},
-    thread,
-};
+use std::{fs::File, ops::Range, sync::Arc, thread};
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, info};
@@ -14,13 +8,14 @@ mod args;
 use args::CliOptions;
 
 mod carvers;
-use carvers::size_carver::carve_using_size;
 
 mod search;
 use search::{Context, search};
 
 mod filetypes;
-use filetypes::Corpus;
+use filetypes::corpus::Corpus;
+
+mod deserializer;
 
 fn main() -> anyhow::Result<()> {
     // harvest cli arguments
@@ -33,7 +28,6 @@ fn main() -> anyhow::Result<()> {
 
     // build our patterns
     let corpus = Arc::new(Corpus::new());
-    let ftype_counter = corpus.index_map();
 
     // build patterns and aho-corasick engine
     let ac = Arc::new(corpus.patterns()?);
@@ -52,7 +46,6 @@ fn main() -> anyhow::Result<()> {
         // clone what is needed
         let mmap_clone = Arc::clone(&mmap); // Clone Arc for each thread
         let multi_progress_clone = Arc::clone(&multi_progress);
-        let mut ftype_counter_clone = Arc::clone(&ftype_counter);
         let ac_clone = Arc::clone(&ac);
         let corpus_clone = Arc::clone(&corpus);
 
@@ -82,11 +75,8 @@ fn main() -> anyhow::Result<()> {
             let mut ctx = Context {
                 mmap: &mmap_clone,
                 bounds: rg,
-                buffer_size: opts.buffer_size,
-                min_size: opts.min_size,
                 pb: &pb,
                 ac: &ac_clone,
-                ft: &mut ftype_counter_clone,
                 corpus: &corpus_clone,
             };
 

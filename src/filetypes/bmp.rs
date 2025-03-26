@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::carvers::size_carver::SizeCarver;
+use crate::{carvers::size_carver::SizeCarver, deserializer::Deserializer};
 
 // see: https://www.ece.ualberta.ca/~elliott/ee552/studentAppNotes/2003_w/misc/bmp_file_format/bmp_file_format.htm
 #[derive(Debug, Default)]
@@ -26,7 +26,7 @@ pub struct BMP {
 
 impl SizeCarver for BMP {
     fn size(&self) -> usize {
-        return self.size as usize;
+        self.size as usize
     }
 
     fn is_genuine(&self) -> bool {
@@ -35,23 +35,20 @@ impl SizeCarver for BMP {
         const BITMAPV4HEADER: u32 = 108;
         const BITMAPV5HEADER: u32 = 128;
 
-        if self.zeroes == 0
+        self.zeroes == 0
             && (self.dib_size == BITMAPINFOHEADER
                 || self.dib_size == BITMAPV5HEADER
                 || self.dib_size == BITMAPV4HEADER
                 || self.dib_size == BITMAPV3INFOHEADER)
-        {
-            return true;
-        } else {
-            return false;
-        }
     }
 
     fn ext(&self) -> String {
         String::from("bmp")
     }
+}
 
-    fn from_bytes(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
+impl Deserializer for BMP {
+    fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
         self.magic = buffer.read_u16::<LittleEndian>()?;
         self.size = buffer.read_u32::<LittleEndian>()?;
         self.zeroes = buffer.read_u32::<LittleEndian>()?;

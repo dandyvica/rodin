@@ -112,8 +112,8 @@ impl CliOptions {
         // input file & layout file are mandatory. Try to canonicalize() at the same time.
         options.input_file = matches.get_one::<PathBuf>("input").unwrap().clone();
         options.buffer_size = *matches.get_one::<usize>("buffer").unwrap_or_else(|| &4096);
-        options.min_size = *matches.get_one::<usize>("minsize").unwrap_or_else(|| &0);
-        options.nb_threads = *matches.get_one::<usize>("nbthreads").unwrap_or_else(|| &1);
+        options.min_size = *matches.get_one::<usize>("minsize").unwrap_or(&0);
+        options.nb_threads = *matches.get_one::<usize>("nbthreads").unwrap_or(&1);
 
         // manage debugging
         if matches.contains_id("verbose") {
