@@ -14,7 +14,10 @@ use crate::{
     filetypes::{bmp::BMP, wav::WAV},
 };
 
-use super::png::{PNGChunk, PNGHeader};
+use super::{
+    jpeg::JpegSegment,
+    png::{PNGChunk, PNGHeader},
+};
 
 // alias for the carving function depending on the file type
 pub type CarvingFunc = fn(&[u8], &FileType) -> anyhow::Result<CarvingResult>;
@@ -108,6 +111,16 @@ impl Corpus {
             ext: String::from("png"),
             carving_func: fourcc_carver::<PNGHeader, PNGChunk>,
             category: String::from("images/png"),
+            min_size: 10000,
+            index: Mutex::new(0),
+        });
+
+        // JPEG
+        vec.push(FileType {
+            magic: hex!("FF D8 FF").to_vec(),
+            ext: String::from("jpg"),
+            carving_func: fourcc_carver::<JpegSegment, JpegSegment>,
+            category: String::from("images/jpg"),
             min_size: 10000,
             index: Mutex::new(0),
         });
