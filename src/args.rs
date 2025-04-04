@@ -21,6 +21,9 @@ pub struct CliOptions {
     // number of threads to use
     pub nb_threads: usize,
 
+    // only carve those file types
+    pub ext_list: Vec<String>,
+
     // display progress bar
     pub progress_bar: bool,
 }
@@ -104,6 +107,15 @@ impl CliOptions {
                     .action(ArgAction::SetTrue)
                     .long_help("Display progress bar"),
             )
+            .arg(
+                Arg::new("ext")
+                    .short('e')
+                    .long("ext")
+                    .help("Comma-separated list of extensions to carve")
+                    .num_args(1)
+                    .value_delimiter(',')
+                    .required(false),
+            )
             .get_matches();
 
         // save all cli options into a structure
@@ -114,6 +126,12 @@ impl CliOptions {
         options.buffer_size = *matches.get_one::<usize>("buffer").unwrap_or_else(|| &4096);
         options.min_size = *matches.get_one::<usize>("minsize").unwrap_or(&0);
         options.nb_threads = *matches.get_one::<usize>("nbthreads").unwrap_or(&1);
+
+        options.ext_list = matches
+            .get_many::<String>("ext")
+            .unwrap()
+            .map(|s| s.clone())
+            .collect();
 
         // manage debugging
         if matches.contains_id("verbose") {

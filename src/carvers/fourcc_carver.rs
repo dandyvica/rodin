@@ -1,9 +1,13 @@
 // carves files ffollowing the FourCC pattern
 use std::{fmt::Debug, io::Cursor};
 
-use log::debug;
+use log::{debug, trace};
+use std::io::ErrorKind;
 
-use crate::{deserializer::Deserializer, filetypes::corpus::FileType};
+use crate::{
+    deserializer::Deserializer,
+    filetypes::corpus::{CarvingMethod, FileType},
+};
 
 use super::CarvingResult;
 
@@ -21,25 +25,66 @@ where
     let mut header = T::default();
     let mut cursor = Cursor::new(mmap);
     header.deserialize(&mut cursor)?;
-    // println!("header={:x?}", header);
 
     loop {
         let mut chunk = U::default();
 
-        if let Err(e) = chunk.deserialize(&mut cursor) {
-            // println!("error chunk={:?} {}", chunk, e);
-            return Ok(CarvingResult::default());
+        match chunk.deserialize(&mut cursor) {
+            Ok(_) => {
+                // did we find the end marker ?
+                if chunk.is_end() {
+                    trace!(
+                        "file type {}: EOF marker for  found!! = {:x?}",
+                        &ft.ext, chunk
+                    );
+                    break;
+                }
+            }
+            Err(e) => match e.kind() {
+                // not really an I/O error
+                // depending on the carving method, we stop here or continue
+                ErrorKind::InvalidData => match ft.carving_method {
+                    // we continue till marker end or maximum length reached
+                    CarvingMethod::Simple => (),
+
+                    // we stop here
+                    CarvingMethod::Fancy => return Ok(CarvingResult::default()),
+                },
+                // here, true I/O error
+                _ => {
+                    debug!(
+                        "file type {}: I/O error: {} deserializing chunk={:?}, skipping",
+                        &ft.ext, e, chunk
+                    );
+                    return Ok(CarvingResult::default());
+                }
+            },
         }
 
-        if chunk.is_end() {
-            // we found the end of fourCC file
-            // println!("EOF chunk found!! = {:x?}", chunk);
-            break;
-        }
+        // if let Err(e) = chunk.deserialize(&mut cursor) {
+        //     debug!(
+        //         "file type {}: error: {} deserializing chunk={:?}, skipping",
+        //         &ft.ext, e, chunk
+        //     );
+        //     return Ok(CarvingResult::default());
+        // }
+
+        // if chunk.is_end() {
+        //     trace!(
+        //         "file type {}: EOF marker for  found!! = {:x?}",
+        //         &ft.ext, chunk
+        //     );
+        //     break;
+        // }
     }
 
     // the cursor position is now the end of file
     let payload = &mmap[..cursor.position() as usize];
+
+    // if the file we found is not bug enough, do not consider it
+    if payload.len() < ft.min_size {
+        return Ok(CarvingResult::default());
+    }
 
     // save file
     let file_name = ft.save_file(payload)?;

@@ -1,4 +1,10 @@
-use std::{fs::File, ops::Range, sync::Arc, thread};
+use std::{
+    fs::File,
+    ops::Range,
+    sync::{Arc, atomic::AtomicU64},
+    thread,
+    time::Instant,
+};
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, info};
@@ -10,7 +16,7 @@ use args::CliOptions;
 mod carvers;
 
 mod search;
-use search::{Context, search};
+use search::Context;
 
 mod filetypes;
 use filetypes::corpus::Corpus;
@@ -20,14 +26,21 @@ mod deserializer;
 fn main() -> anyhow::Result<()> {
     // harvest cli arguments
     let opts = CliOptions::new()?;
+    let now = Instant::now();
 
     // open image and build mmap
     let file = File::open(&opts.input_file)?;
     let mmap = unsafe { MmapOptions::new().map(&file)? };
     let mmap = Arc::new(mmap);
 
-    // build our patterns
-    let corpus = Arc::new(Corpus::new());
+    // build our patterns and optionally retain only file types that are passed in the cli
+    let mut corpus = Corpus::new();
+    corpus.retain(&opts.ext_list);
+
+    let corpus = Arc::new(corpus);
+
+    // counter on the number of files currently carved out, for all threads
+    let nb_files = Arc::new(AtomicU64::new(0));
 
     // build patterns and aho-corasick engine
     let ac = Arc::new(corpus.patterns()?);
@@ -36,9 +49,7 @@ fn main() -> anyhow::Result<()> {
     let multi_progress = Arc::new(MultiProgress::new());
 
     // compute the different chunk according to the number of threads
-    // mmap is divided in several nb threads chunks, each chunk is provided to a thread
-    // bu
-
+    // mmap is divided in several nb_threads chunks, each chunk is provided to a thread
     let mut handles = vec![];
     let chunk_size = mmap.len() / opts.nb_threads;
 
@@ -48,10 +59,11 @@ fn main() -> anyhow::Result<()> {
         let multi_progress_clone = Arc::clone(&multi_progress);
         let ac_clone = Arc::clone(&ac);
         let corpus_clone = Arc::clone(&corpus);
+        let nb_files_clone = Arc::clone(&nb_files);
 
         // spawn thread
-        let handle = thread::spawn(move || {
-            info!("================== starting thread {}", i);
+        let handle = thread::spawn(move || -> anyhow::Result<usize> {
+            info!("starting thread {}", i);
 
             // calculate the buffer offsets
             let start = i * chunk_size;
@@ -64,12 +76,9 @@ fn main() -> anyhow::Result<()> {
             // we pass the range to the search function
             let rg = Range { start, end };
 
-            // define a progress bar
+            // define a progress bar dedicated to this thread
             let pb = multi_pbar(&multi_progress_clone, end - start, i);
-            pb.set_message("Searching.......");
-
-            // each thread processes its assigned chunk
-            // let chunk = &mmap_clone[start..end];
+            pb.set_message("Searching..................");
 
             // now search within each chunk
             let mut ctx = Context {
@@ -78,27 +87,39 @@ fn main() -> anyhow::Result<()> {
                 pb: &pb,
                 ac: &ac_clone,
                 corpus: &corpus_clone,
+                nb_files: &nb_files_clone,
             };
 
-            let found = search(&mut ctx).unwrap();
+            let found = ctx.search()?;
 
             // end of thread
             pb.set_message(format!("thread finished, {} files found", found));
             pb.finish();
+
+            Ok(found)
         });
 
         handles.push(handle);
     }
 
     // Wait for all threads to complete
-    let mut i = 0;
+    let mut thread_id = 0;
+    let mut total_count = 0usize;
+
     for handle in handles {
         match handle.join() {
-            Ok(_) => info!("Thread {} finished successfully!", i),
-            Err(_) => info!("Thread {} panicked!", i),
+            Ok(res) => match res {
+                Ok(count) => total_count += count,
+                Err(e) => info!("Thread {} finished successfully!", thread_id),
+            },
+            Err(_) => info!("Thread {} panicked!", thread_id),
         }
-        i += 1;
+        thread_id += 1;
     }
+
+    // print out statistics
+    let elapsed = now.elapsed();
+    println!("total time: {:?}", elapsed);
 
     Ok(())
 }

@@ -22,6 +22,14 @@ use super::{
 // alias for the carving function depending on the file type
 pub type CarvingFunc = fn(&[u8], &FileType) -> anyhow::Result<CarvingResult>;
 
+// carving mode
+#[derive(Debug, Default)]
+pub enum CarvingMethod {
+    #[default]
+    Simple, // carve between a header and a footer
+    Fancy, // follows the file structure
+}
+
 // define what we're going to search for
 #[derive(Debug)]
 pub struct FileType {
@@ -40,8 +48,14 @@ pub struct FileType {
     // the minimum file size to consider for this file type
     pub min_size: usize,
 
+    // the maximum number of bytes we analyze when carving
+    pub max_size: usize,
+
     // the current index of the file being carved
     pub index: Mutex<usize>,
+
+    // the method used to carve
+    pub carving_method: CarvingMethod,
 }
 
 impl FileType {
@@ -92,7 +106,9 @@ impl Corpus {
             carving_func: carve_using_size::<BMP>,
             category: String::from("images/bmp"),
             min_size: 10000,
+            max_size: 1000000,
             index: Mutex::new(0),
+            carving_method: CarvingMethod::Simple,
         });
 
         // WAV
@@ -102,7 +118,9 @@ impl Corpus {
             carving_func: carve_using_size::<WAV>,
             category: String::from("audio/wav"),
             min_size: 10000,
+            max_size: 1000000,
             index: Mutex::new(0),
+            carving_method: CarvingMethod::Simple,
         });
 
         // PNG
@@ -112,7 +130,9 @@ impl Corpus {
             carving_func: fourcc_carver::<PNGHeader, PNGChunk>,
             category: String::from("images/png"),
             min_size: 10000,
+            max_size: 1000000,
             index: Mutex::new(0),
+            carving_method: CarvingMethod::Simple,
         });
 
         // JPEG
@@ -122,7 +142,9 @@ impl Corpus {
             carving_func: fourcc_carver::<JpegSegment, JpegSegment>,
             category: String::from("images/jpg"),
             min_size: 10000,
+            max_size: 1000000,
             index: Mutex::new(0),
+            carving_method: CarvingMethod::Simple,
         });
 
         Self(vec)
@@ -138,6 +160,13 @@ impl Corpus {
         let ac = AhoCorasickBuilder::new().build(&patterns)?;
 
         Ok(ac)
+    }
+
+    // only keep the extensions found in the list passed
+    pub fn retain(&mut self, ext_list: &[String]) {
+        if !ext_list.is_empty() {
+            self.0.retain(|ft| ext_list.contains(&ft.ext));
+        }
     }
 }
 
