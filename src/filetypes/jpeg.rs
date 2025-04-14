@@ -1,9 +1,15 @@
- use core::fmt;
-use std::io::{Error, ErrorKind};
+use core::fmt;
+use std::{
+    io::{BufRead, Error, ErrorKind, Read},
+    ops::Deref,
+};
 
 use byteorder::{BigEndian, ReadBytesExt};
+use log::trace;
 
 use crate::{carvers::fourcc_carver::FourCCCarver, deserializer::Deserializer, err};
+
+// common JPEG segments
 
 // start of image
 const SOI: [u8; 2] = [0xFF, 0xD8];
@@ -30,26 +36,69 @@ impl Deserializer for PNGHeader {
     }
 }
 
-#[derive(Default)]
-pub struct JpegSegment {
-    segment_type: [u8; 2], // chunk type
-    length: Option<u16>,   // length of the chunk data (big-endian) include itself
-}
+// a segment type is given by just 2 bytes
+#[derive(Debug, Default)]
+pub struct SegmentType([u8; 2]);
 
-impl JpegSegment {
+impl SegmentType {
     // those segment have no length
     pub fn is_standalone(&self) -> bool {
-        if self.segment_type == SOI
-            || self.segment_type == EOI
-            || self.segment_type == TIM
-            || (self.segment_type[0] == 0xFF
-                && self.segment_type[1] >= 0xD0
-                && self.segment_type[1] <= 0xD7)
+        if self.0 == SOI
+            || self.0 == EOI
+            || self.0 == TIM
+            || (self.0[0] == 0xFF && self.0[1] >= 0xD0 && self.0[1] <= 0xD7)
         {
             true
         } else {
             false
         }
+    }
+
+    // not all arrays of 2 bytes are valid Jpeg segments
+    fn is_valid(&self) -> bool {
+        // we only consider 2-bytes
+        if self.0.len() != 2 {
+            return false;
+        }
+
+        // first byte must be 0xFF
+        if self.0[0] != 0xFF {
+            return false;
+        }
+
+        // now second byte
+        if self.0[1] < 0xC0 {
+            return false;
+        }
+
+        true
+    }
+}
+
+impl Deref for SegmentType {
+    type Target = [u8; 2];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl PartialEq<[u8; 2]> for SegmentType {
+    fn eq(&self, other: &[u8; 2]) -> bool {
+        self.0 == *other
+    }
+}
+
+#[derive(Default)]
+pub struct JpegSegment {
+    segment_type: SegmentType, // chunk type
+    length: Option<u16>,       // length of the chunk data (big-endian) include itself
+}
+
+impl JpegSegment {
+    // those segment have no length
+    pub fn is_standalone(&self) -> bool {
+        self.segment_type.is_standalone()
     }
 }
 
@@ -57,7 +106,7 @@ impl fmt::Debug for JpegSegment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ctype={:X?} length={:?} ",
+            "segment_type={:X?} length={:?} ",
             self.segment_type, self.length
         )
     }
@@ -65,16 +114,24 @@ impl fmt::Debug for JpegSegment {
 
 impl Deserializer for JpegSegment {
     fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
-        self.segment_type[0] = buffer.read_u8()?;
-        self.segment_type[1] = buffer.read_u8()?;
+        // read first byte
+        self.segment_type.0[0] = buffer.read_u8()?;
 
         // check for marker validity
         if self.segment_type[0] != 0xFF {
             return err!(ErrorKind::InvalidData);
         }
 
+        // now we can read the second byte
+        self.segment_type.0[1] = buffer.read_u8()?;
+
         // those markers have no length, so return
         if self.is_standalone() {
+            trace!(
+                "standalone segment found: {:?}, offset: {}",
+                self,
+                buffer.position()
+            );
             return Ok(());
         }
 
@@ -88,12 +145,17 @@ impl Deserializer for JpegSegment {
         // is not immediately followed by 0x00 (see "byte stuffing")
         if self.segment_type == SOS {
             loop {
-                let byte1 = buffer.read_u8()?;
+                let mut buf = vec![];
 
-                // search for FF
-                if byte1 != 0xFF {
-                    continue;
-                }
+                // read until we find 0xFF
+                let _ = buffer.read_until(0xFF, &mut buf)?;
+
+                // let byte1 = buffer.read_u8()?;
+
+                // // search for FF
+                // if byte1 != 0xFF {
+                //     continue;
+                // }
 
                 // found FF: if byte2 is a restart marker (D0 to D7) or 0, continue
                 let byte2 = buffer.read_u8()?;

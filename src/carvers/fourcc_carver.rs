@@ -34,8 +34,10 @@ where
                 // did we find the end marker ?
                 if chunk.is_end() {
                     trace!(
-                        "file type {}: EOF marker for  found!! = {:x?}",
-                        &ft.ext, chunk
+                        "file type {}: EOF marker found!! = {:x?} at offset: {:X?}",
+                        &ft.ext,
+                        chunk,
+                        cursor.position()
                     );
                     break;
                 }
@@ -44,6 +46,9 @@ where
                 // not really an I/O error
                 // depending on the carving method, we stop here or continue
                 ErrorKind::InvalidData => match ft.carving_method {
+                    // halt whenever a chunk is not recognized
+                    CarvingMethod::Strict => return Ok(CarvingResult::default()),
+
                     // we continue till marker end or maximum length reached
                     CarvingMethod::Simple => (),
 
@@ -60,22 +65,6 @@ where
                 }
             },
         }
-
-        // if let Err(e) = chunk.deserialize(&mut cursor) {
-        //     debug!(
-        //         "file type {}: error: {} deserializing chunk={:?}, skipping",
-        //         &ft.ext, e, chunk
-        //     );
-        //     return Ok(CarvingResult::default());
-        // }
-
-        // if chunk.is_end() {
-        //     trace!(
-        //         "file type {}: EOF marker for  found!! = {:x?}",
-        //         &ft.ext, chunk
-        //     );
-        //     break;
-        // }
     }
 
     // the cursor position is now the end of file

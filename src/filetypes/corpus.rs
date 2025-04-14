@@ -3,7 +3,7 @@ use std::{
     io::{BufWriter, Write},
     ops::Deref,
     path::Path,
-    sync::Mutex,
+    sync::Mutex, usize,
 };
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
@@ -26,8 +26,9 @@ pub type CarvingFunc = fn(&[u8], &FileType) -> anyhow::Result<CarvingResult>;
 #[derive(Debug, Default)]
 pub enum CarvingMethod {
     #[default]
+    Strict, // respect the file structure
     Simple, // carve between a header and a footer
-    Fancy, // follows the file structure
+    Fancy,  // follows the file structure
 }
 
 // define what we're going to search for
@@ -96,7 +97,7 @@ pub struct Corpus(Vec<FileType>);
 impl Corpus {
     // define all file types to carve
     // we had here all we know about a file type: magic number, how to carve it, its category, ...
-    pub fn new() -> Self {
+    pub fn new(min_size: usize) -> Self {
         let mut vec = Vec::new();
 
         // BMP
@@ -105,7 +106,7 @@ impl Corpus {
             ext: String::from("bmp"),
             carving_func: carve_using_size::<BMP>,
             category: String::from("images/bmp"),
-            min_size: 10000,
+            min_size: min_size,
             max_size: 1000000,
             index: Mutex::new(0),
             carving_method: CarvingMethod::Simple,
@@ -117,7 +118,7 @@ impl Corpus {
             ext: String::from("wav"),
             carving_func: carve_using_size::<WAV>,
             category: String::from("audio/wav"),
-            min_size: 10000,
+            min_size: min_size,
             max_size: 1000000,
             index: Mutex::new(0),
             carving_method: CarvingMethod::Simple,
@@ -129,7 +130,7 @@ impl Corpus {
             ext: String::from("png"),
             carving_func: fourcc_carver::<PNGHeader, PNGChunk>,
             category: String::from("images/png"),
-            min_size: 10000,
+            min_size: min_size,
             max_size: 1000000,
             index: Mutex::new(0),
             carving_method: CarvingMethod::Simple,
@@ -141,10 +142,10 @@ impl Corpus {
             ext: String::from("jpg"),
             carving_func: fourcc_carver::<JpegSegment, JpegSegment>,
             category: String::from("images/jpg"),
-            min_size: 10000,
+            min_size: min_size,
             max_size: 1000000,
             index: Mutex::new(0),
-            carving_method: CarvingMethod::Simple,
+            carving_method: CarvingMethod::Strict,
         });
 
         Self(vec)

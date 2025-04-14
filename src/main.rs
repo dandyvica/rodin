@@ -1,13 +1,13 @@
 use std::{
     fs::File,
     ops::Range,
-    sync::{Arc, atomic::AtomicU64},
+    sync::{Arc, atomic::AtomicUsize},
     thread,
     time::Instant,
 };
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::{debug, info};
+use log::{debug, info, trace};
 use memmap2::MmapOptions;
 
 mod args;
@@ -26,6 +26,7 @@ mod deserializer;
 fn main() -> anyhow::Result<()> {
     // harvest cli arguments
     let opts = CliOptions::new()?;
+    trace!("args: {:?}", opts);
     let now = Instant::now();
 
     // open image and build mmap
@@ -34,13 +35,13 @@ fn main() -> anyhow::Result<()> {
     let mmap = Arc::new(mmap);
 
     // build our patterns and optionally retain only file types that are passed in the cli
-    let mut corpus = Corpus::new();
+    let mut corpus = Corpus::new(opts.min_size);
     corpus.retain(&opts.ext_list);
 
     let corpus = Arc::new(corpus);
 
     // counter on the number of files currently carved out, for all threads
-    let nb_files = Arc::new(AtomicU64::new(0));
+    let nb_files = Arc::new(AtomicUsize::new(0));
 
     // build patterns and aho-corasick engine
     let ac = Arc::new(corpus.patterns()?);
@@ -90,7 +91,7 @@ fn main() -> anyhow::Result<()> {
                 nb_files: &nb_files_clone,
             };
 
-            let found = ctx.search()?;
+            let found = ctx.search(&opts.limit)?;
 
             // end of thread
             pb.set_message(format!("thread finished, {} files found", found));

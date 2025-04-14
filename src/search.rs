@@ -3,34 +3,36 @@
 
 use std::{
     ops::Range,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use crate::filetypes::corpus::Corpus;
 
 use aho_corasick::AhoCorasick;
 use indicatif::ProgressBar;
-use log::debug;
+use log::{debug, info, trace};
 
 #[derive(Debug)]
 pub struct Context<'a> {
-    pub mmap: &'a [u8],          // the mmap to search
-    pub bounds: Range<usize>,    // contains the bounds of the chunk to search
-    pub pb: &'a ProgressBar,     // ref on progress bar
-    pub ac: &'a AhoCorasick,     // ref on Aho-Corasick engine
-    pub corpus: &'a Corpus,      // ref on global corpus
-    pub nb_files: &'a AtomicU64, // ref on the global number of file currently carved out
+    pub mmap: &'a [u8],            // the mmap to search
+    pub bounds: Range<usize>,      // contains the bounds of the chunk to search
+    pub pb: &'a ProgressBar,       // ref on progress bar
+    pub ac: &'a AhoCorasick,       // ref on Aho-Corasick engine
+    pub corpus: &'a Corpus,        // ref on global corpus
+    pub nb_files: &'a AtomicUsize, // ref on the global number of file currently carved out
 }
 
 impl<'a> Context<'a> {
     // add 1 to the global number of file currently carved out
-    pub fn one_more(&mut self) {
+    /*     pub fn one_more(&mut self) {
         self.nb_files.fetch_add(1, Ordering::Relaxed);
-    }
+    } */
 
     // try to carve file using the context. This means trying out all patterns using the Aho-Corasick
     // algorithm to get potential file signatures, and call the carving function to try to carve
-    pub fn search(&mut self) -> anyhow::Result<usize> {
+    pub fn search(&mut self, limit: &Option<usize>) -> anyhow::Result<usize> {
+        trace!("bounds={:?}", self.bounds);
+
         // loop through bytes trying to discover some patterns
         let absolute_offset = self.bounds.start;
 
@@ -75,13 +77,19 @@ impl<'a> Context<'a> {
 
             // update progress bar with the file name being carved
             let file_name = res.file_name.unwrap();
-            debug!(
-                "found image {} at offsets: {}-{}",
+            info!(
+                "found image {} at offsets: 0x{:X?}-0x{:X?}",
                 file_name, absolute_found_offset, res.offset
             );
             self.pb.set_message(file_name);
 
+            // stop carving is we reached the limit
             files_found += 1;
+            if let Some(limit) = limit {
+                if files_found > *limit {
+                    return Ok(files_found);
+                }
+            }
         }
 
         Ok(files_found)

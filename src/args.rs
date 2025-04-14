@@ -26,6 +26,9 @@ pub struct CliOptions {
 
     // display progress bar
     pub progress_bar: bool,
+
+    // maximum number of files to carve, after that, stops
+    pub limit: Option<usize>,
 }
 
 impl CliOptions {
@@ -86,6 +89,15 @@ impl CliOptions {
                     .required(false),
             )
             .arg(
+                Arg::new("limit")
+                    .short('l')
+                    .long("limit")
+                    .long_help("Stop carving after <LIMIT> files")
+                    .value_name("LIMIT")
+                    .value_parser(clap::value_parser!(usize))
+                    .required(false),
+            )
+            .arg(
                 Arg::new("log")
                     .long("log")
                     .long_help("Save debugging info into the file LOG.")
@@ -126,6 +138,7 @@ impl CliOptions {
         options.buffer_size = *matches.get_one::<usize>("buffer").unwrap_or_else(|| &4096);
         options.min_size = *matches.get_one::<usize>("minsize").unwrap_or(&0);
         options.nb_threads = *matches.get_one::<usize>("nbthreads").unwrap_or(&1);
+        options.limit = matches.get_one::<usize>("limit").copied();
 
         options.ext_list = matches
             .get_many::<String>("ext")

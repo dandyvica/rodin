@@ -15,7 +15,7 @@ impl CarvingResult {
     // helper to define a new result
     pub fn new(offset: u64, file_name: &str) -> Self {
         Self {
-            offset: offset,
+            offset,
             file_name: Some(String::from(file_name)),
         }
     }
