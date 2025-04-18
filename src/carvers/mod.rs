@@ -9,14 +9,21 @@ pub struct CarvingResult {
 
     // if a file is found, this is its file name
     pub file_name: Option<String>,
+
+    // payload length is the artefact length
+    pub length: usize,
+/* 
+    // sample bytes from offset
+    pub sample: Vec<u8>, */
 }
 
 impl CarvingResult {
     // helper to define a new result
-    pub fn new(offset: u64, file_name: &str) -> Self {
+    pub fn new(offset: u64, file_name: &str, length: usize) -> Self {
         Self {
             offset,
             file_name: Some(String::from(file_name)),
+            length
         }
     }
 }

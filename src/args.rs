@@ -29,6 +29,9 @@ pub struct CliOptions {
 
     // maximum number of files to carve, after that, stops
     pub limit: Option<usize>,
+
+    // audit file where location of artefacts are found
+    pub audit: bool,
 }
 
 impl CliOptions {
@@ -118,6 +121,13 @@ impl CliOptions {
                     .short('p')
                     .action(ArgAction::SetTrue)
                     .long_help("Display progress bar"),
+            )
+            .arg(
+                Arg::new("audit")
+                    .long("audit")
+                    .short('a')
+                    .action(ArgAction::SetTrue)
+                    .long_help("Create the audit file"),
             )
             .arg(
                 Arg::new("ext")

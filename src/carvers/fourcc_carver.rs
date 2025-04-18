@@ -79,5 +79,5 @@ where
     let file_name = ft.save_file(payload)?;
 
     // move offset, lock will be automatically released
-    Ok(CarvingResult::new(cursor.position(), &file_name))
+    Ok(CarvingResult::new(cursor.position(), &file_name, payload.len()))
 }

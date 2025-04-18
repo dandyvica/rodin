@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    io::{BufRead, Error, ErrorKind, Read},
+    io::{BufRead, Cursor, Error, ErrorKind, Read},
     ops::Deref,
 };
 
@@ -29,10 +29,10 @@ pub struct PNGHeader {
 }
 
 impl Deserializer for PNGHeader {
-    fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
+    fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<usize> {
         self.signature = buffer.read_u64::<BigEndian>()?;
 
-        Ok(())
+        Ok(8)
     }
 }
 
@@ -113,7 +113,7 @@ impl fmt::Debug for JpegSegment {
 }
 
 impl Deserializer for JpegSegment {
-    fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
+    fn deserialize(&mut self, buffer: &mut Cursor<&[u8]>) -> std::io::Result<usize> {
         // read first byte
         self.segment_type.0[0] = buffer.read_u8()?;
 
@@ -132,7 +132,7 @@ impl Deserializer for JpegSegment {
                 self,
                 buffer.position()
             );
-            return Ok(());
+            return Ok(2);
         }
 
         // all JPEG markers have the second byte > 0xC0 except for 0x01 (TIM) which is already processed
@@ -150,21 +150,16 @@ impl Deserializer for JpegSegment {
                 // read until we find 0xFF
                 let _ = buffer.read_until(0xFF, &mut buf)?;
 
-                // let byte1 = buffer.read_u8()?;
-
-                // // search for FF
-                // if byte1 != 0xFF {
-                //     continue;
-                // }
-
                 // found FF: if byte2 is a restart marker (D0 to D7) or 0, continue
                 let byte2 = buffer.read_u8()?;
                 if (0xD0 <= byte2 && byte2 <= 0xD7) || byte2 == 0 {
                     continue;
                 } else {
                     // rewind of 2 bytes
-                    buffer.set_position(buffer.position() - 2);
-                    return Ok(());
+                    let pos = buffer.position() - 2;
+                    buffer.set_position(pos);
+                    self.length = Some(pos as u16);
+                    return Ok(pos as usize);
                 }
             }
         }
@@ -176,14 +171,72 @@ impl Deserializer for JpegSegment {
 
         // skip payload
         let pos = buffer.position();
-        buffer.set_position(pos + self.length.unwrap() as u64 - 2);
+        let new_pos = pos + self.length.unwrap() as u64 - 2;
+        buffer.set_position(new_pos);
 
-        Ok(())
+        Ok(self.length.unwrap() as usize - 2)
     }
 }
 
 impl FourCCCarver for JpegSegment {
     fn is_end(&self) -> bool {
         self.segment_type == EOI
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs::{self, File},
+        io::Cursor,
+    };
+
+    use hex_literal::hex;
+
+    use super::*;
+
+    #[test]
+    fn segment_type() {
+        let st = SegmentType(SOI);
+        assert!(st.is_valid());
+        assert!(st.is_standalone());
+
+        let st = SegmentType([0xFF, 0xC0]);
+        assert!(st.is_valid());
+        assert!(!st.is_standalone());
+
+        let st = SegmentType([0x00, 0xC0]);
+        assert!(!st.is_valid());
+        assert!(!st.is_standalone());
+    }
+
+    #[test]
+    fn jpeg_segment() {
+        let raw_data = hex!("FF E0 00 10 4A 46 49 46 00 01 01 00 00 01 00 01 00 00");
+        let mut c = Cursor::new(raw_data.as_slice());
+        let mut segment = JpegSegment::default();
+        let n = segment.deserialize(&mut c).unwrap();
+        assert_eq!(n, 14);
+
+        assert_eq!(segment.segment_type, [0xFF, 0xE0]);
+        assert_eq!(segment.length.unwrap(), 16);
+    }
+
+    #[test]
+    fn read_file() {
+        let path = "./test/artefacts/sample.jpg";
+        let mut f = File::open(path).unwrap();
+        let mut buffer = Vec::new();
+        f.read_to_end(&mut buffer).unwrap();
+        let mut cursor = Cursor::new(buffer.as_slice());
+
+        loop {
+            let mut seg = JpegSegment::default();
+            let _ = seg.deserialize(&mut cursor).unwrap();
+            println!("{:?}", seg);
+            if seg.is_end() {
+                break;
+            }
+        }
     }
 }

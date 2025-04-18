@@ -31,12 +31,12 @@ impl SizeCarver for WAV {
 }
 
 impl Deserializer for WAV {
-    fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
+    fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<usize> {
         self.magic = buffer.read_u32::<LittleEndian>()?;
         self.size = buffer.read_u32::<LittleEndian>()?;
         self.id = buffer.read_u64::<LittleEndian>()?;
         self.chunk_size = buffer.read_u32::<LittleEndian>()?;
 
-        Ok(())
+        Ok(20)
     }
 }

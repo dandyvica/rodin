@@ -3,10 +3,16 @@
 
 use std::{
     ops::Range,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
-use crate::filetypes::corpus::Corpus;
+use crate::{
+    audit::{AuditData, AuditFile},
+    filetypes::corpus::Corpus,
+};
 
 use aho_corasick::AhoCorasick;
 use indicatif::ProgressBar;
@@ -14,12 +20,13 @@ use log::{debug, info, trace};
 
 #[derive(Debug)]
 pub struct Context<'a> {
-    pub mmap: &'a [u8],            // the mmap to search
-    pub bounds: Range<usize>,      // contains the bounds of the chunk to search
-    pub pb: &'a ProgressBar,       // ref on progress bar
-    pub ac: &'a AhoCorasick,       // ref on Aho-Corasick engine
-    pub corpus: &'a Corpus,        // ref on global corpus
-    pub nb_files: &'a AtomicUsize, // ref on the global number of file currently carved out
+    pub mmap: &'a [u8],                   // the mmap to search
+    pub bounds: Range<usize>,             // contains the bounds of the chunk to search
+    pub pb: &'a ProgressBar,              // ref on progress bar
+    pub ac: &'a AhoCorasick,              // ref on Aho-Corasick engine
+    pub corpus: &'a Corpus,               // ref on global corpus
+    pub nb_files: &'a AtomicUsize,        // ref on the global number of file currently carved out
+    pub audit_file: &'a Mutex<AuditFile>, // ref on audit file
 }
 
 impl<'a> Context<'a> {
@@ -45,10 +52,13 @@ impl<'a> Context<'a> {
         // loop through the pattern we found
         // a found pattern doesn't mean it's a genuine file. It's a potentialty
         for mat in self.ac.find_iter(chunk) {
+            let pat_index = mat.pattern().as_usize();
+            let pat = &self.corpus.get(pat_index).unwrap().ext;
             debug!(
-                "Found pattern {:?} at offset 0x{:X?}",
-                mat.pattern().as_u64(),
-                mat.start() as u64
+                "Found pattern '{}' at offset 0x{:X?}({})",
+                pat,
+                mat.start(),
+                mat.start()
             );
 
             // pattern returned contains the index of the pattern inside the corpus
@@ -68,19 +78,36 @@ impl<'a> Context<'a> {
 
             // let ft = Arc::new(ft);
             // println!("starting carving at offset: {}", absolute_found_offset);
-            let res = carving_func(&self.mmap[absolute_found_offset..], ft)?;
+            let result = carving_func(&self.mmap[absolute_found_offset..], ft)?;
 
-            // offset returned is 0, we didn't find/carve any file
-            if res.offset == 0 {
+            // offset returned is 0, we didn't find/carve any artefact
+            if result.offset == 0 {
                 continue;
             }
 
             // update progress bar with the file name being carved
-            let file_name = res.file_name.unwrap();
+            let file_name = result.file_name.unwrap();
             info!(
-                "found image {} at offsets: 0x{:X?}-0x{:X?}",
-                file_name, absolute_found_offset, res.offset
+                "found and carved artefact ({}) at offsets: 0x{:X?}-0x{:X?}",
+                file_name,
+                absolute_found_offset,
+                absolute_found_offset as u64 + result.offset
             );
+
+            // save audit data
+            let ad = AuditData {
+                artefact: &file_name.as_str(),
+                offset_start: absolute_found_offset as u64,
+                offset_end: absolute_found_offset as u64 + result.offset,
+                length: result.length as u64,
+            };
+            {
+                if let Ok(mut ul) = self.audit_file.try_lock() {
+                    ul.add_artefact(&ad)?;
+                }
+            }
+
+            // print out file name on progress bar
             self.pb.set_message(file_name);
 
             // stop carving is we reached the limit

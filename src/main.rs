@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     ops::Range,
-    sync::{Arc, atomic::AtomicUsize},
+    sync::{Arc, Mutex, atomic::AtomicUsize},
     thread,
     time::Instant,
 };
@@ -23,6 +23,9 @@ use filetypes::corpus::Corpus;
 
 mod deserializer;
 
+mod audit;
+use audit::AuditFile;
+
 fn main() -> anyhow::Result<()> {
     // harvest cli arguments
     let opts = CliOptions::new()?;
@@ -33,6 +36,11 @@ fn main() -> anyhow::Result<()> {
     let file = File::open(&opts.input_file)?;
     let mmap = unsafe { MmapOptions::new().map(&file)? };
     let mmap = Arc::new(mmap);
+
+    // create audit file
+    let mut ad = AuditFile::new()?;
+    ad.add_metadata(&opts.input_file, mmap.len())?;
+    let audit_file = Arc::new(Mutex::new(ad));
 
     // build our patterns and optionally retain only file types that are passed in the cli
     let mut corpus = Corpus::new(opts.min_size);
@@ -61,6 +69,7 @@ fn main() -> anyhow::Result<()> {
         let ac_clone = Arc::clone(&ac);
         let corpus_clone = Arc::clone(&corpus);
         let nb_files_clone = Arc::clone(&nb_files);
+        let audit_file_clone = Arc::clone(&audit_file);
 
         // spawn thread
         let handle = thread::spawn(move || -> anyhow::Result<usize> {
@@ -89,6 +98,7 @@ fn main() -> anyhow::Result<()> {
                 ac: &ac_clone,
                 corpus: &corpus_clone,
                 nb_files: &nb_files_clone,
+                audit_file: &audit_file_clone,
             };
 
             let found = ctx.search(&opts.limit)?;
@@ -120,7 +130,7 @@ fn main() -> anyhow::Result<()> {
 
     // print out statistics
     let elapsed = now.elapsed();
-    println!("total time: {:?}", elapsed);
+    println!("total time: {:?}, total number of artefacts: {}", elapsed, total_count);
 
     Ok(())
 }

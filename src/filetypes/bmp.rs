@@ -48,7 +48,7 @@ impl SizeCarver for BMP {
 }
 
 impl Deserializer for BMP {
-    fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<()> {
+    fn deserialize(&mut self, buffer: &mut std::io::Cursor<&[u8]>) -> std::io::Result<usize> {
         self.magic = buffer.read_u16::<LittleEndian>()?;
         self.size = buffer.read_u32::<LittleEndian>()?;
         self.zeroes = buffer.read_u32::<LittleEndian>()?;
@@ -65,6 +65,6 @@ impl Deserializer for BMP {
         self.bi_clr_used = buffer.read_u32::<LittleEndian>()?;
         self.bi_clr_important = buffer.read_u32::<LittleEndian>()?;
 
-        Ok(())
+        Ok(48 + 6)
     }
 }

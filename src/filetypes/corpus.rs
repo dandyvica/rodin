@@ -1,9 +1,10 @@
 use std::{
     fs::{self, File},
     io::{BufWriter, Write},
-    ops::Deref,
+    ops::{Deref, Index},
     path::Path,
-    sync::Mutex, usize,
+    sync::Mutex,
+    usize,
 };
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
@@ -170,6 +171,15 @@ impl Corpus {
         }
     }
 }
+
+// impl Index<usize> for Corpus {
+//     type Output = Option<String>;
+
+//     fn index(&self, i: usize) -> &Self::Output {
+//         self.0.iter().find(|)
+
+//     }
+// }
 
 impl Deref for Corpus {
     type Target = Vec<FileType>;
